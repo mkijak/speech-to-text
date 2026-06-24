@@ -15,6 +15,7 @@ import re
 import sys
 import time
 import json
+import inspect
 import traceback
 from pathlib import Path
 
@@ -155,7 +156,15 @@ def _load_diarizer(token, device):
         from whisperx.diarize import DiarizationPipeline
     except Exception:
         from whisperx import DiarizationPipeline  # older layout
-    return DiarizationPipeline(use_auth_token=token, device=device)
+    # The HF auth kwarg was renamed across versions: use_auth_token -> token.
+    # Pick whichever the installed version actually accepts.
+    params = inspect.signature(DiarizationPipeline.__init__).parameters
+    kwargs = {"device": device}
+    if "use_auth_token" in params:
+        kwargs["use_auth_token"] = token
+    elif "token" in params:
+        kwargs["token"] = token
+    return DiarizationPipeline(**kwargs)
 
 
 def _assign_speakers(diar_segments, result):
