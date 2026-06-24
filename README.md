@@ -5,8 +5,9 @@ transcript out. Transcription (`large-v3`) **and** diarization (who-said-what)
 in one step. Runs on GPU or CPU.
 
 ```
-input/   ← drop audio here (mp3, wav, m4a, flac, ogg, mp4, mkv, ...)
-output/  ← <name>.txt (speaker-grouped) and <name>.srt appear here
+speech-to-text/
+  input/   ← drop audio here (mp3, wav, m4a, flac, ogg, mp4, mkv, ...)
+  output/  ← <name>.txt (speaker-grouped) and <name>.srt appear here
 ```
 
 Speakers come out as `SPEAKER_00`, `SPEAKER_01`, … — find-and-replace them with
@@ -45,7 +46,7 @@ For Blackwell script uses CUDA 12.8 + cu128 PyTorch.
    ```
    First build downloads a few GB and compiles nothing scary; first transcription
    also downloads `large-v3` (~3 GB) into a cached volume (only once).
-4. Drop an audio file into `input\`. Watch progress:
+4. Drop an audio file into `speech-to-text\input\`. Watch progress:
    ```powershell
    docker compose --profile gpu logs -f
    ```

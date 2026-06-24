@@ -12,8 +12,8 @@ x-common: &common
     - path: .env
       required: false      # works even before you create .env (diarization just stays off)
   volumes:
-    - ./input:/data/input
-    - ./output:/data/output
+    - ./speech-to-text/input:/data/input
+    - ./speech-to-text/output:/data/output
     - hf-cache:/cache/hf        # caches downloaded models (large-v3 ~3GB, pyannote, alignment)
   restart: unless-stopped
 
