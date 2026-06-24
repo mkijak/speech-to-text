@@ -1,0 +1,4 @@
+# Keep this folder in git, ignore the transcripts produced here.
+*
+!.gitignore
+!.gitkeep

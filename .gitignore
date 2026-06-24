@@ -1,0 +1,6 @@
+# Local secrets / config (HF_TOKEN lives here) — never commit
+.env
+
+# Python
+__pycache__/
+*.py[cod]

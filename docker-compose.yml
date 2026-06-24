@@ -1,0 +1,49 @@
+# Two profiles, one image:
+#   GPU (default):  docker compose --profile gpu up -d --build
+#   CPU:            docker compose --profile cpu up -d --build
+#
+# Drop audio into ./input ; transcripts land in ./output.
+# Put your Hugging Face token in .env (see .env.example) to enable diarization.
+
+x-common: &common
+  build: .
+  image: speech-to-text:latest
+  env_file:
+    - path: .env
+      required: false      # works even before you create .env (diarization just stays off)
+  volumes:
+    - ./input:/data/input
+    - ./output:/data/output
+    - hf-cache:/cache/hf        # caches downloaded models (large-v3 ~3GB, pyannote, alignment)
+  restart: unless-stopped
+
+services:
+  # --- GPU: best quality, large-v3 in float16. Needs NVIDIA GPU + container toolkit.
+  stt:
+    <<: *common
+    profiles: ["gpu"]
+    environment:
+      MODEL: ${MODEL:-large-v3}
+      DEVICE: cuda
+      COMPUTE_TYPE: ${COMPUTE_TYPE:-float16}
+      BATCH_SIZE: ${BATCH_SIZE:-16}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # --- CPU: no GPU needed. Smaller model + int8 so it's actually usable on CPU.
+  stt-cpu:
+    <<: *common
+    profiles: ["cpu"]
+    environment:
+      MODEL: ${CPU_MODEL:-small}     # base/small/medium — bigger = slower but better
+      DEVICE: cpu
+      COMPUTE_TYPE: int8
+      BATCH_SIZE: ${CPU_BATCH_SIZE:-4}
+
+volumes:
+  hf-cache:
