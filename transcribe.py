@@ -31,6 +31,10 @@ LANGUAGE     = os.getenv("LANGUAGE", "pl").strip() or None      # None = autodet
 DEVICE       = os.getenv("DEVICE", "cuda")
 COMPUTE_TYPE = os.getenv("COMPUTE_TYPE", "float16")             # cpu: use int8
 BATCH_SIZE   = int(os.getenv("BATCH_SIZE", "16"))
+# Quality knobs (you have GPU headroom). Higher beam = more accurate, a bit slower.
+BEAM_SIZE    = int(os.getenv("BEAM_SIZE", "5"))
+# Prime the model with domain vocabulary / names so it spells jargon correctly.
+INITIAL_PROMPT = os.getenv("INITIAL_PROMPT", "").strip() or None
 DIARIZE      = os.getenv("DIARIZE", "1") not in ("0", "false", "False", "")
 HF_TOKEN     = os.getenv("HF_TOKEN", "").strip()
 # Pin the diarization model. Empty = whisperx default (currently
@@ -109,8 +113,12 @@ class Pipeline:
     def __init__(self):
         log(f"device={DEVICE} compute_type={COMPUTE_TYPE} model={MODEL} "
             f"language={LANGUAGE or 'auto'} diarize={DIARIZE}")
+        asr_options = {"beam_size": BEAM_SIZE}
+        if INITIAL_PROMPT:
+            asr_options["initial_prompt"] = INITIAL_PROMPT
         self.asr = whisperx.load_model(
-            MODEL, DEVICE, compute_type=COMPUTE_TYPE, language=LANGUAGE)
+            MODEL, DEVICE, compute_type=COMPUTE_TYPE, language=LANGUAGE,
+            asr_options=asr_options)
 
         # Alignment model is language-specific; load lazily per detected language.
         self._align_cache = {}
@@ -136,10 +144,36 @@ class Pipeline:
             log(f"alignment skipped for language '{lang}': {e}")
             return segments
 
-    def run(self, audio_path, min_speakers=None, max_speakers=None):
+    def _apply_options(self, prompt, beam):
+        # Per-file overrides of the ASR options that were baked in at load time.
+        # Option container differs across versions (NamedTuple vs dataclass), so
+        # set each key the most compatible way and ignore unknown ones.
+        wanted = {}
+        if prompt is not None:
+            wanted["initial_prompt"] = prompt
+        if beam is not None:
+            wanted["beam_size"] = beam
+        for k, v in wanted.items():
+            try:
+                self.asr.options = self.asr.options._replace(**{k: v})
+            except Exception:
+                try:
+                    setattr(self.asr.options, k, v)
+                except Exception:
+                    pass
+
+    def run(self, audio_path, min_speakers=None, max_speakers=None,
+            prompt=None, language=None, beam=None):
+        self._apply_options(prompt, beam)
         audio = whisperx.load_audio(str(audio_path))
-        result = self.asr.transcribe(audio, batch_size=BATCH_SIZE)
-        lang = result.get("language", LANGUAGE) or "en"
+        kwargs = {"batch_size": BATCH_SIZE}
+        if language:
+            kwargs["language"] = language
+        try:
+            result = self.asr.transcribe(audio, **kwargs)
+        except TypeError:
+            result = self.asr.transcribe(audio, batch_size=BATCH_SIZE)
+        lang = result.get("language", language or LANGUAGE) or "en"
 
         segments = self._align(result["segments"], lang, audio)
 
@@ -201,6 +235,46 @@ def parse_speakers(stem):
     return lo, hi, clean
 
 
+def load_instructions(audio_path):
+    """Optional per-file instruction sidecar: a '<name>.txt' next to the audio
+    with simple key=value lines (# comments allowed), e.g.:
+
+        speakers = 4            # exact count, or a range like 2-5
+        prompt   = ...          # vocabulary / context for THIS recording
+        language = pl           # optional, overrides default
+        beam     = 10           # optional, overrides default
+
+    Returns a dict of the keys present (empty if no sidecar)."""
+    _, _, clean = parse_speakers(audio_path.stem)
+    for cand in (
+        audio_path.with_name(audio_path.stem + ".txt"),
+        audio_path.with_name(clean + ".txt"),
+    ):
+        try:
+            if not cand.is_file():
+                continue
+            data = {}
+            for line in cand.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                data[k.strip().lower()] = v.strip()
+            return data
+        except OSError:
+            pass
+    return {}
+
+
+def _speakers_from_str(s):
+    m = re.match(r"\s*(\d+)\s*(?:-\s*(\d+))?\s*$", s or "")
+    if not m:
+        return None, None
+    lo = int(m.group(1))
+    hi = int(m.group(2)) if m.group(2) else lo
+    return lo, hi
+
+
 def out_paths(stem):
     return OUT_DIR / f"{stem}.txt", OUT_DIR / f"{stem}.srt"
 
@@ -223,7 +297,17 @@ def stable(path, prev_sizes):
 
 
 def process(pipe, audio_path):
+    # Filename speaker marker is the fallback; the instruction file overrides it.
     lo, hi, stem = parse_speakers(audio_path.stem)
+    instr = load_instructions(audio_path)
+    if "speakers" in instr:
+        s_lo, s_hi = _speakers_from_str(instr["speakers"])
+        if s_lo is not None:
+            lo, hi = s_lo, s_hi
+    prompt = instr.get("prompt") or INITIAL_PROMPT
+    language = instr.get("language") or LANGUAGE
+    beam = int(instr["beam"]) if instr.get("beam", "").isdigit() else BEAM_SIZE
+
     txt, srt = out_paths(stem)
     if lo is None and hi is None:
         spk = "auto"
@@ -231,9 +315,16 @@ def process(pipe, audio_path):
         spk = str(lo)
     else:
         spk = f"{lo}-{hi}"
-    log(f"transcribing: {audio_path.name}  (speakers: {spk})")
+    extras = []
+    if instr:
+        extras.append("instructions")
+    if prompt:
+        extras.append("prompt")
+    tag = f"  [{', '.join(extras)}]" if extras else ""
+    log(f"transcribing: {audio_path.name}  (speakers: {spk}, beam: {beam}){tag}")
     t0 = time.monotonic()
-    segments = pipe.run(audio_path, min_speakers=lo, max_speakers=hi)
+    segments = pipe.run(audio_path, min_speakers=lo, max_speakers=hi,
+                        prompt=prompt, language=language, beam=beam)
     write_txt(segments, txt)
     write_srt(segments, srt)
     log(f"done: {txt.name}  ({time.monotonic() - t0:.0f}s)")

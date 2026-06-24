@@ -1,0 +1,15 @@
+# Per-recording instructions.
+#
+# To use: copy this next to your audio in the share's input/ folder, renamed to
+# match the audio. For  standup.mp3  ->  standup.txt
+#
+# All keys optional. Lines starting with # are ignored. Anything you omit falls
+# back to the defaults in .env.
+
+speakers = 4
+# speakers = 2-5      # use a range when you're not sure of the exact count
+
+prompt = Spotkanie zespołu. Słownictwo: Magento, Symfony, Solr, feed, branch, deploy, B2B, Bimago, atrybuty.
+
+# language = pl       # override the default language for just this file
+# beam = 10           # override decoding beam size for just this file

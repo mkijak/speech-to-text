@@ -73,10 +73,20 @@ you're patient) in `.env`. On CPU, `large-v3` on a 40-min file can take ~30+ min
 - **Stop / start:** `docker compose --profile gpu down` / `... up -d`.
 - **One-shot instead of watching:** set `WATCH=0` in `.env` — it processes
   everything in `input/` once and exits.
-- **Speaker count per file** (improves diarization): put it in the filename —
+- **Per-recording instructions** (recommended): drop a `<name>.txt` next to the
+  audio (e.g. `standup.mp3` → `standup.txt`) with simple `key=value` lines:
+  ```
+  speakers = 4        # exact, or a range like 2-5
+  prompt   = Dev meeting. Vocabulary: Magento, Symfony, Solr, feeds, B2B, Bimago.
+  language = pl        # optional
+  beam     = 10        # optional
+  ```
+  Each key overrides the `.env` default for that file only. See `instruction.example.txt`.
+  Drop the `.txt` together with (or just before) the audio. Omit it and the `.env`
+  defaults apply.
+- **Quick speaker count without a sidecar:** put it in the filename —
   `standup.3spk.mp3` (exactly 3), `panel.2-5spk.mp3` (2–5). The marker is stripped
-  from the output (`standup.txt`). No marker → falls back to `MIN_SPEAKERS`/`MAX_SPEAKERS`
-  in `.env`, or auto-detect if those are blank.
+  from the output name. The instruction file's `speakers` wins if both are present.
 
 ## Tuning
 
