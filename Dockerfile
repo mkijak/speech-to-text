@@ -24,6 +24,11 @@ RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pyt
 # WhisperX pulls faster-whisper, ctranslate2, pyannote.audio, etc.
 RUN pip install --no-cache-dir whisperx
 
+# torchcodec gets pulled in but can't match the image's FFmpeg and we don't use it
+# (audio is decoded via the ffmpeg binary / fed to pyannote in-memory). Remove it to
+# silence the "torchcodec is not installed correctly" warning at startup.
+RUN pip uninstall -y torchcodec || true
+
 WORKDIR /app
 COPY transcribe.py /app/transcribe.py
 
