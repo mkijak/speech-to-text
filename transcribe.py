@@ -33,6 +33,10 @@ COMPUTE_TYPE = os.getenv("COMPUTE_TYPE", "float16")             # cpu: use int8
 BATCH_SIZE   = int(os.getenv("BATCH_SIZE", "16"))
 DIARIZE      = os.getenv("DIARIZE", "1") not in ("0", "false", "False", "")
 HF_TOKEN     = os.getenv("HF_TOKEN", "").strip()
+# Pin the diarization model. Empty = whisperx default (currently
+# pyannote/speaker-diarization-community-1). Set e.g. pyannote/speaker-diarization-3.1
+# to force a model you've already been granted access to.
+DIARIZE_MODEL = os.getenv("DIARIZE_MODEL", "").strip() or None
 MIN_SPEAKERS = _int_or_none(os.getenv("MIN_SPEAKERS"))
 MAX_SPEAKERS = _int_or_none(os.getenv("MAX_SPEAKERS"))
 WATCH        = os.getenv("WATCH", "1") not in ("0", "false", "False", "")
@@ -117,7 +121,7 @@ class Pipeline:
                 log("DIARIZE=1 but HF_TOKEN is empty -> diarization DISABLED. "
                     "Set HF_TOKEN and accept the pyannote model licenses to enable.")
             else:
-                self.diarizer = _load_diarizer(HF_TOKEN, DEVICE)
+                self.diarizer = _load_diarizer(HF_TOKEN, DEVICE, DIARIZE_MODEL)
                 log("diarization pipeline loaded")
 
     def _align(self, segments, lang, audio):
@@ -150,16 +154,18 @@ class Pipeline:
         return segments
 
 
-def _load_diarizer(token, device):
+def _load_diarizer(token, device, model_name=None):
     # Class location moved across whisperx versions; try the known spots.
     try:
         from whisperx.diarize import DiarizationPipeline
     except Exception:
         from whisperx import DiarizationPipeline  # older layout
-    # The HF auth kwarg was renamed across versions: use_auth_token -> token.
-    # Pick whichever the installed version actually accepts.
+    # Signatures drift across versions: the auth kwarg was renamed
+    # use_auth_token -> token, and we only pass model_name if accepted.
     params = inspect.signature(DiarizationPipeline.__init__).parameters
     kwargs = {"device": device}
+    if model_name and "model_name" in params:
+        kwargs["model_name"] = model_name
     if "use_auth_token" in params:
         kwargs["use_auth_token"] = token
     elif "token" in params:
