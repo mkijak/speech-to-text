@@ -13,6 +13,7 @@ processes the files passed as CLI args once and exits.
 import os
 import re
 import sys
+import gc
 import time
 import json
 import inspect
@@ -20,6 +21,11 @@ import traceback
 from pathlib import Path
 
 import whisperx
+
+try:
+    import torch
+except Exception:  # pragma: no cover - torch is always present with whisperx
+    torch = None
 
 # ---- config from environment -------------------------------------------------
 def _int_or_none(v):
@@ -55,6 +61,18 @@ AUDIO_EXT = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".aac",
 
 def log(msg):
     print(f"[stt] {msg}", flush=True)
+
+
+def _free():
+    """Release cached VRAM so the next stage/file gets a clean, unfragmented heap.
+    Without this the caching allocator hoards memory across files -> 'worked once,
+    then OOM' on the second recording."""
+    gc.collect()
+    if torch is not None and DEVICE == "cuda":
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
 
 
 # ---- output formatting -------------------------------------------------------
@@ -174,8 +192,10 @@ class Pipeline:
         except TypeError:
             result = self.asr.transcribe(audio, batch_size=BATCH_SIZE)
         lang = result.get("language", language or LANGUAGE) or "en"
+        _free()  # release the decode batch before loading the alignment model
 
         segments = self._align(result["segments"], lang, audio)
+        _free()
 
         if self.diarizer is not None:
             try:
@@ -185,6 +205,8 @@ class Pipeline:
                 segments = merged["segments"]
             except Exception as e:
                 log(f"diarization failed (writing transcript without speakers): {e}")
+        del audio
+        _free()  # clean heap before the next file's transcribe batch
         return segments
 
 

@@ -27,7 +27,11 @@ services:
       MODEL: ${MODEL:-large-v3}
       DEVICE: cuda
       COMPUTE_TYPE: ${COMPUTE_TYPE:-float16}
-      BATCH_SIZE: ${BATCH_SIZE:-16}
+      BATCH_SIZE: ${BATCH_SIZE:-8}     # 16 OOMs a 16GB card alongside diarization; 8 is the safe default
+      # Let the CUDA allocator grow/shrink instead of hoarding fragmented blocks
+      # -> kills the "fine on file 1, OOM on file 2" pattern. Must be an env var
+      # (read before torch inits CUDA), not settable from Python.
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
     deploy:
       resources:
         reservations:
