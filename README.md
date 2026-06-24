@@ -73,8 +73,10 @@ you're patient) in `.env`. On CPU, `large-v3` on a 40-min file can take ~30+ min
 - **Stop / start:** `docker compose --profile gpu down` / `... up -d`.
 - **One-shot instead of watching:** set `WATCH=0` in `.env` — it processes
   everything in `input/` once and exits.
-- **Known speaker count** improves diarization: set `MIN_SPEAKERS`/`MAX_SPEAKERS`
-  in `.env` (e.g. both `2` for a 1-on-1 call).
+- **Speaker count per file** (improves diarization): put it in the filename —
+  `standup.3spk.mp3` (exactly 3), `panel.2-5spk.mp3` (2–5). The marker is stripped
+  from the output (`standup.txt`). No marker → falls back to `MIN_SPEAKERS`/`MAX_SPEAKERS`
+  in `.env`, or auto-detect if those are blank.
 
 ## Tuning
 

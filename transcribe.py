@@ -11,6 +11,7 @@ Behaviour is env-driven (see .env.example). Runs as a watcher by default
 processes the files passed as CLI args once and exits.
 """
 import os
+import re
 import sys
 import time
 import json
@@ -130,7 +131,7 @@ class Pipeline:
             log(f"alignment skipped for language '{lang}': {e}")
             return segments
 
-    def run(self, audio_path):
+    def run(self, audio_path, min_speakers=None, max_speakers=None):
         audio = whisperx.load_audio(str(audio_path))
         result = self.asr.transcribe(audio, batch_size=BATCH_SIZE)
         lang = result.get("language", LANGUAGE) or "en"
@@ -140,7 +141,7 @@ class Pipeline:
         if self.diarizer is not None:
             try:
                 diar = self.diarizer(
-                    audio, min_speakers=MIN_SPEAKERS, max_speakers=MAX_SPEAKERS)
+                    audio, min_speakers=min_speakers, max_speakers=max_speakers)
                 merged = _assign_speakers(diar, {"segments": segments})
                 segments = merged["segments"]
             except Exception as e:
@@ -166,13 +167,32 @@ def _assign_speakers(diar_segments, result):
 
 
 # ---- file handling -----------------------------------------------------------
-def out_paths(audio_path):
-    stem = audio_path.stem
+# Speaker hint in the filename: "3spk" = exactly 3, "2-4spk" = a range.
+SPK_RE = re.compile(r"(\d+)\s*(?:-\s*(\d+))?\s*spk", re.I)
+
+
+def parse_speakers(stem):
+    """Return (min_speakers, max_speakers, clean_stem) from a filename stem.
+
+    Reads a "<n>spk" / "<a>-<b>spk" marker anywhere in the name and strips it
+    from the output name. Falls back to the env defaults when no marker present.
+    """
+    m = SPK_RE.search(stem)
+    if not m:
+        return MIN_SPEAKERS, MAX_SPEAKERS, stem
+    lo = int(m.group(1))
+    hi = int(m.group(2)) if m.group(2) else lo
+    clean = (stem[:m.start()] + stem[m.end():]).strip(" ._-") or stem
+    return lo, hi, clean
+
+
+def out_paths(stem):
     return OUT_DIR / f"{stem}.txt", OUT_DIR / f"{stem}.srt"
 
 
 def already_done(audio_path):
-    txt, _ = out_paths(audio_path)
+    _, _, stem = parse_speakers(audio_path.stem)
+    txt, _ = out_paths(stem)
     return txt.exists()
 
 
@@ -188,10 +208,17 @@ def stable(path, prev_sizes):
 
 
 def process(pipe, audio_path):
-    txt, srt = out_paths(audio_path)
-    log(f"transcribing: {audio_path.name}")
+    lo, hi, stem = parse_speakers(audio_path.stem)
+    txt, srt = out_paths(stem)
+    if lo is None and hi is None:
+        spk = "auto"
+    elif lo == hi:
+        spk = str(lo)
+    else:
+        spk = f"{lo}-{hi}"
+    log(f"transcribing: {audio_path.name}  (speakers: {spk})")
     t0 = time.monotonic()
-    segments = pipe.run(audio_path)
+    segments = pipe.run(audio_path, min_speakers=lo, max_speakers=hi)
     write_txt(segments, txt)
     write_srt(segments, srt)
     log(f"done: {txt.name}  ({time.monotonic() - t0:.0f}s)")
